@@ -1,0 +1,23 @@
+:root { --accent: #f47521; --muted: #6b6b70; --line: #e2e2e6; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --muted: #9a9aa2; --line: #34343a; } body { background: #1e1e22; color: #ececf0; } }
+body { width: 300px; margin: 0; padding: 14px; font: 13px/1.5 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.status { font-weight: 600; margin-bottom: 6px; }
+.detail { color: var(--muted); min-height: 1.5em; margin-bottom: 10px; word-break: break-word; }
+.progress { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-bottom: 6px; }
+.progress div { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+.buttons { display: flex; gap: 8px; margin-bottom: 12px; }
+button { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+button:disabled { opacity: 0.45; cursor: default; }
+footer { display: flex; justify-content: space-between; border-top: 1px solid var(--line); padding-top: 8px; }
+.muted { color: var(--muted); }
+a { color: var(--accent); text-decoration: none; }
+.switch { position: relative; width: 36px; height: 20px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch span { position: absolute; inset: 0; border-radius: 10px; background: #aaa; cursor: pointer; transition: background 0.2s; }
+.switch span::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+.switch input:checked + span { background: var(--accent); }
+.switch input:checked + span::before { transform: translateX(16px); }
+.row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
+select option { color: #000; }

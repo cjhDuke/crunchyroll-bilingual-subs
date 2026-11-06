@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <strong>Crunchyroll 双语字幕</strong>
+    <label class="switch" title="总开关">
+      <input id="enabled" type="checkbox">
+      <span></span>
+    </label>
+  </header>
+  <div id="status" class="status">读取中…</div>
+  <div id="progress" class="progress" hidden><div id="bar"></div></div>
+  <div id="detail" class="detail"></div>
+  <label class="row">字幕显示
+    <select id="displayMode">
+      <option value="bilingual">双语</option>
+      <option value="translation">仅译文</option>
+      <option value="original">仅原文</option>
+    </select>
+  </label>
+  <div class="buttons">
+    <button id="retryGoogle" type="button" disabled>重翻谷歌部分</button>
+    <button id="retryAll" type="button" disabled>全部重翻</button>
+  </div>
+  <footer>
+    <span id="model" class="muted"></span>
+    <a href="#" id="openOptions">设置</a>
+  </footer>
+  <script src="../shared/settings.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

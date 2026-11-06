@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Crunchyroll 双语字幕",
+  "version": "0.1.0",
+  "description": "用大模型把 Crunchyroll 字幕翻译成目标语言并双语显示，失败时回退谷歌机翻。",
+  "permissions": ["storage", "unlimitedStorage"],
+  "host_permissions": [
+    "https://www.crunchyroll.com/*",
+    "https://*.crunchyrollcdn.com/*",
+    "https://api.deepseek.com/*",
+    "https://translate.googleapis.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "background": {
+    "service_worker": "src/background/sw.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.crunchyroll.com/*"],
+      "js": ["src/core/playback.js", "src/page/hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://www.crunchyroll.com/*"],
+      "js": [
+        "src/shared/settings.js",
+        "src/core/ass.js",
+        "src/core/playback.js",
+        "src/core/llm.js",
+        "src/core/google.js",
+        "src/core/translator.js",
+        "src/core/session.js",
+        "src/lib/ass.global.min.js",
+        "src/content/overlay.js",
+        "src/content/content.js"
+      ],
+      "css": ["src/content/overlay.css"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "Crunchyroll 双语字幕",
+    "default_popup": "src/popup/popup.html"
+  },
+  "options_page": "src/options/options.html"
+}

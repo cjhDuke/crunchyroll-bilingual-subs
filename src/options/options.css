@@ -1,0 +1,63 @@
+:root {
+  --fg: #1d1d1f;
+  --muted: #6b6b70;
+  --line: #e2e2e6;
+  --accent: #f47521;
+  --danger: #c62828;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --fg: #ececf0; --muted: #9a9aa2; --line: #34343a; }
+  body { background: #18181b; }
+}
+body {
+  margin: 0;
+  font: 14px/1.6 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  color: var(--fg);
+}
+main { max-width: 620px; margin: 32px auto; padding: 0 20px 48px; }
+h1 { font-size: 22px; margin: 0 0 20px; }
+h2 { font-size: 15px; margin: 0 0 12px; }
+section, details {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 12px; }
+label { display: block; margin-bottom: 14px; font-weight: 600; }
+label small { display: block; font-weight: 400; color: var(--muted); margin-top: 4px; }
+input[type="text"], input[type="url"], input[type="password"], input[type="number"], select, textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 400;
+}
+textarea { font-family: Consolas, monospace; font-size: 13px; }
+input[type="range"] { width: 100%; margin-top: 8px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row input { flex: 1; }
+button {
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button.danger { color: var(--danger); border-color: var(--danger); }
+button.ghost { margin-top: 6px; }
+.actions { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; }
+.hint { color: var(--muted); }
+.hint.ok { color: #2e7d32; }
+.hint.err { color: var(--danger); }

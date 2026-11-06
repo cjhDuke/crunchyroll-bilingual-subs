@@ -1,0 +1,69 @@
+.crbs-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+.crbs-signs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.crbs-area {
+  position: absolute;
+  pointer-events: none;
+}
+.crbs-bottom,
+.crbs-top {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15em;
+  text-align: center;
+}
+.crbs-bottom { bottom: 6%; }
+.crbs-top { top: 5%; }
+.crbs-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05em;
+}
+.crbs-tr,
+.crbs-orig {
+  color: #fff;
+  line-height: 1.25;
+  white-space: pre-line;
+  font-weight: 600;
+  text-shadow:
+    -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000,
+    0 0 3px #000, 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+.crbs-tr {
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+}
+.crbs-orig {
+  font-family: "Trebuchet MS", "Segoe UI", Arial, sans-serif;
+}
+.crbs-italic .crbs-orig { font-style: italic; }
+.crbs-orig.crbs-dim { opacity: 0.92; }
+
+.crbs-toast {
+  position: absolute;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font: 14px/1.4 "Microsoft YaHei", sans-serif;
+  opacity: 0;
+  transition: opacity 0.2s;
+  white-space: nowrap;
+}
+.crbs-toast.crbs-show { opacity: 1; }
