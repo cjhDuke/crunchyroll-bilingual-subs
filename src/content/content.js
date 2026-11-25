@@ -8,9 +8,12 @@
   let settings = Object.assign({}, C.DEFAULT_SETTINGS);
   const state = {
     episodeId: null,
+    subtitleOffsetSeconds: 0,
     title: '',
     subtitles: {},
     pendingLang: null,
+    desiredLang: null,
+    hasAds: false,
     trackKey: null,
     lang: null,
     session: null,
@@ -19,6 +22,11 @@
   };
   let gate = null;
   let lastPlayheadPush = 0;
+  let generation = 0;
+  let selectionTimer = null;
+  let adEpisode = null;
+  let offsetRevision = 0;
+  let offsetWrites = Promise.resolve();
 
   const overlay = new C.Overlay();
 
@@ -44,13 +52,36 @@
   }
 
   function overlayOpts() {
-    return { displayMode: settings.displayMode, translationPosition: settings.translationPosition, fontScale: settings.fontScale };
+    return { displayMode: settings.displayMode, translationPosition: settings.translationPosition, fontScale: settings.fontScale, subtitleOffsetSeconds: state.subtitleOffsetSeconds };
+  }
+
+  function subtitleTime(video) {
+    return (video ? video.currentTime : 0) - state.subtitleOffsetSeconds;
+  }
+
+  function applyOffset(offset) {
+    state.subtitleOffsetSeconds = C.normalizeSubtitleOffset(offset);
+    overlay.setOptions(overlayOpts());
+    if (state.session) state.session.setPlayhead(subtitleTime(C.findVideo()));
+    checkGate();
+  }
+
+  async function loadOffset(episodeId) {
+    const revision = ++offsetRevision;
+    applyOffset(0);
+    try {
+      await offsetWrites;
+      const key = C.subtitleOffsetKey(episodeId);
+      const saved = await chrome.storage.local.get(key);
+      if (revision === offsetRevision && episodeId === state.episodeId) applyOffset(saved[key]);
+    } catch { /* 存储不可用时保留本次播放值 */ }
   }
 
   // ---------- 会话 ----------
 
   function stopSession() {
-    endGate(false, true);
+    generation++;
+    endGate(true, true);
     if (state.session) state.session.stop();
     state.session = null;
     state.trackKey = null;
@@ -60,21 +91,30 @@
 
   async function selectTrack(lang, episodeId) {
     if (!settings.enabled) return;
-    if (episodeId && state.episodeId && episodeId !== state.episodeId) {
+    if (!state.episodeId || (episodeId && episodeId !== state.episodeId)) {
       // 播放信息还没到（或属于别的集），先记下
       state.pendingLang = { lang, episodeId };
       return;
     }
-    const key = `${state.episodeId}:${lang}`;
-    if (key === state.trackKey) return;
+    state.desiredLang = lang;
+    clearTimeout(selectionTimer);
+    selectionTimer = null;
+    const sub = state.subtitles[lang];
+    const key = `${state.episodeId}:${lang}:${sub ? sub.format : ''}`;
+    if (key === state.trackKey && state.status !== 'error') return;
     stopSession();
+    const token = generation;
+    const current = () => token === generation;
+    const selectedEpisode = state.episodeId;
+    const title = state.title;
+    const selectedSettings = settings;
     state.trackKey = key;
     state.lang = lang;
+    state.error = null;
     if (lang === 'none') { state.status = 'idle'; return; }
-    const sub = state.subtitles[lang];
     if (!sub) {
-      state.pendingLang = { lang, episodeId };
       state.trackKey = null;
+      state.status = 'idle';
       return;
     }
     if (sub.format !== 'ass') {
@@ -88,47 +128,63 @@
       // 在下载字幕期间就先拦住开播
       beginGate(null);
       const text = await bg({ type: 'fetchText', url: sub.url });
-      if (state.trackKey !== key) return;
+      if (!current()) return;
       const { events } = C.parseAss(text);
       const dialogue = events.filter(C.isDialogueEvent);
       const dialogueSet = new Set(dialogue.map((e) => e.index));
       overlay.setOptions(overlayOpts());
       overlay.setTrack({ dialogue, signsAss: C.stripDialogue(text, dialogueSet) });
 
-      const lang2 = C.findLang(settings.targetLang);
-      const cacheKey = `cache:${state.episodeId}:${lang}:${lang2.code}:${C.hashString(text)}`;
+      const lang2 = C.findLang(selectedSettings.targetLang);
+      const cacheKey = `cache:${selectedEpisode}:${lang}:${lang2.code}:${C.hashString(text)}`;
       const session = new C.TrackSession({
         events: dialogue,
-        title: state.title,
-        settings,
+        title,
+        settings: selectedSettings,
         deps: {
           translateBatch: (input, ctx) => C.translateBatch(input, Object.assign({}, ctx, { lang: lang2 }), {
             llm: (messages) => bg({ type: 'chat', messages }),
             google: (texts, tl) => bg({ type: 'google', texts, tl }),
           }),
           glossary: async (allText) => {
-            const content = await bg({ type: 'chat', messages: C.buildGlossaryMessages({ allText, title: state.title, targetLangName: lang2.name }) });
+            const content = await bg({ type: 'chat', messages: C.buildGlossaryMessages({ allText, title, targetLangName: lang2.name }) });
             return C.parseGlossary(content);
           },
           cacheGet: async () => (await chrome.storage.local.get(cacheKey))[cacheKey] || null,
-          cacheSet: (obj) => chrome.storage.local.set({ [cacheKey]: Object.assign(obj, { episodeId: state.episodeId, subLang: lang, targetLang: lang2.code }) }),
+          cacheSet: (obj) => chrome.storage.local.set({ [cacheKey]: Object.assign({}, obj, { episodeId: selectedEpisode, subLang: lang, targetLang: lang2.code }) }),
         },
       });
       state.session = session;
       overlay.setSession(session);
       session.onUpdate(() => checkGate());
       const v = C.findVideo();
-      if (v) session.setPlayhead(v.currentTime);
+      if (v) session.setPlayhead(subtitleTime(v));
       gate && (gate.session = session);
       await session.start();
+      if (!current()) return;
       state.status = 'active';
       checkGate();
     } catch (err) {
-      if (state.trackKey !== key) return;
+      if (!current()) return;
       state.status = 'error';
       state.error = String((err && err.message) || err);
-      endGate(false);
+      endGate(true);
       overlay.toast('字幕加载失败：' + state.error, 5000);
+    }
+  }
+
+  function ensureSelection() {
+    if (state.desiredLang !== null) {
+      selectTrack(state.desiredLang, state.episodeId);
+    } else {
+      if (selectionTimer !== null) return;
+      selectionTimer = setTimeout(() => {
+        selectionTimer = null;
+        const langs = Object.keys(state.subtitles);
+        const lang = langs.find((l) => /^en(?:-|$)/i.test(l) && state.subtitles[l].format === 'ass')
+          || langs.find((l) => state.subtitles[l].format === 'ass') || langs[0];
+        if (lang) selectTrack(lang, state.episodeId);
+      }, 2500);
     }
   }
 
@@ -136,6 +192,7 @@
 
   function beginGate(session) {
     endGate(false, true);
+    if (state.hasAds) return;
     gate = { session, deadline: Date.now() + START_WAIT_MS, pausedByUs: false, timer: null };
     gate.timer = setInterval(checkGate, 500);
     const v = C.findVideo();
@@ -152,7 +209,7 @@
   function isReadyNow() {
     if (!gate || !gate.session) return false;
     const v = C.findVideo();
-    return gate.session.isReadyAt(v ? v.currentTime : 0);
+    return gate.session.isReadyAt(subtitleTime(v));
   }
 
   function checkGate() {
@@ -161,7 +218,7 @@
       endGate(true);
     } else if (Date.now() > gate.deadline) {
       endGate(true);
-      overlay.toast('翻译较慢，先显示原字幕，译文稍后出现', 4000);
+      overlay.toast('翻译较慢，先继续播放，译文稍后出现', 4000);
     }
   }
 
@@ -183,7 +240,7 @@
   }, true);
 
   document.addEventListener('seeking', (e) => {
-    if (state.session && e.target instanceof HTMLVideoElement) state.session.setPlayhead(e.target.currentTime);
+    if (state.session && e.target instanceof HTMLVideoElement) state.session.setPlayhead(subtitleTime(e.target));
   }, true);
 
   document.addEventListener('timeupdate', (e) => {
@@ -191,7 +248,7 @@
     const now = Date.now();
     if (now - lastPlayheadPush > 3000) {
       lastPlayheadPush = now;
-      state.session.setPlayhead(e.target.currentTime);
+      state.session.setPlayhead(subtitleTime(e.target));
     }
   }, true);
 
@@ -204,15 +261,37 @@
       postConfig();
     } else if (msg.type === 'playback') {
       if (!settings.enabled) return;
-      if (msg.episodeId !== state.episodeId) stopSession();
+      const subtitles = (msg.info && msg.info.subtitles) || {};
+      // An ad/promo response is not a new episode or a replacement track list.
+      if (!Object.keys(subtitles).length) {
+        if (msg.info && msg.info.hasAds) {
+          adEpisode = msg.episodeId;
+          if (msg.episodeId === state.episodeId) {
+            state.hasAds = true;
+            endGate(true);
+          }
+        }
+        return;
+      }
+      if (msg.episodeId !== state.episodeId) {
+        stopSession();
+        clearTimeout(selectionTimer);
+        selectionTimer = null;
+        state.desiredLang = null;
+        state.hasAds = msg.episodeId === adEpisode;
+        state.episodeId = msg.episodeId;
+        loadOffset(msg.episodeId);
+      }
       state.episodeId = msg.episodeId;
       state.title = cleanTitle(msg.title);
-      state.subtitles = (msg.info && msg.info.subtitles) || {};
+      state.subtitles = subtitles;
+      state.hasAds = state.hasAds || !!msg.info.hasAds;
+      if (state.hasAds) endGate(true);
       const p = state.pendingLang;
       if (p && (!p.episodeId || p.episodeId === state.episodeId)) {
         state.pendingLang = null;
         selectTrack(p.lang, p.episodeId);
-      }
+      } else ensureSelection();
     } else if (msg.type === 'subtitle-selected') {
       selectTrack(msg.lang, msg.episodeId);
     }
@@ -227,6 +306,7 @@
         data: {
           enabled: settings.enabled,
           episodeId: state.episodeId,
+          subtitleOffsetSeconds: state.subtitleOffsetSeconds,
           title: state.title,
           lang: state.lang,
           status: state.status,
@@ -234,6 +314,20 @@
           stats: state.session ? state.session.stats() : null,
         },
       });
+    } else if (msg.type === 'setSubtitleOffset') {
+      if (!state.episodeId || msg.episodeId !== state.episodeId || typeof msg.offsetSeconds !== 'number' || !Number.isFinite(msg.offsetSeconds)) {
+        sendResponse({ ok: false, error: '播放集已变化或偏移值无效，请重新打开弹窗' });
+        return false;
+      }
+      ++offsetRevision; // 用户调整优先于尚未结束的本集读取。
+      const episodeId = state.episodeId;
+      const offset = C.normalizeSubtitleOffset(msg.offsetSeconds);
+      applyOffset(offset);
+      const write = offsetWrites.then(() => chrome.storage.local.set({ [C.subtitleOffsetKey(episodeId)]: offset }));
+      offsetWrites = write.catch(() => {});
+      write.then(() => sendResponse({ ok: true, data: { episodeId, subtitleOffsetSeconds: offset } }),
+        () => sendResponse({ ok: false, error: '时间调整已生效，但保存失败，请重试' }));
+      return true;
     } else if (msg.type === 'retranslate') {
       if (state.session) state.session.retranslate(msg.scope === 'all' ? 'all' : 'google');
       sendResponse({ ok: !!state.session });

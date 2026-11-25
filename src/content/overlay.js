@@ -6,7 +6,7 @@
 
   class Overlay {
     constructor() {
-      this.opts = { displayMode: 'bilingual', translationPosition: 'top', fontScale: 1 };
+      this.opts = { displayMode: 'bilingual', translationPosition: 'top', fontScale: 1, subtitleOffsetSeconds: 0 };
       this.dialogue = [];
       this.session = null;
       this.signsAss = null;
@@ -21,12 +21,23 @@
     setOptions(opts) {
       Object.assign(this.opts, opts);
       this.lastKey = '';
+      this.syncSigns();
+      if (this.video && this.topEl) this.renderAt(this.video.currentTime - this.opts.subtitleOffsetSeconds, this.layout());
+    }
+
+    syncSigns() {
+      if (this.signsEl) this.signsEl.style.visibility = this.opts.displayMode === 'translation' ? 'hidden' : 'visible';
+      if (this.ass) {
+        this.ass.delay = this.opts.subtitleOffsetSeconds;
+        if (this.opts.displayMode === 'translation') this.ass.hide(); else this.ass.show();
+      }
     }
 
     ensureMounted() {
       const video = findVideo();
       if (!video) return false;
       const host = video.parentElement;
+      let remounted = false;
       if (!this.root || !this.root.isConnected || this.root.parentElement !== host) {
         if (this.root) this.root.remove();
         this.root = document.createElement('div');
@@ -44,9 +55,10 @@
         this.toastEl.className = 'crbs-toast';
         this.root.append(this.signsEl, this.area, this.toastEl);
         host.appendChild(this.root);
+        remounted = true;
         this.lastKey = '';
       }
-      if (video !== this.video) {
+      if (video !== this.video || remounted) {
         this.video = video;
         this.rebuildSigns();
       }
@@ -75,6 +87,7 @@
       if (!this.signsAss || !this.video || !this.signsEl || typeof root.ASS !== 'function') return;
       try {
         this.ass = new root.ASS(this.signsAss, this.video, { container: this.signsEl, resampling: 'video_height' });
+        this.syncSigns();
       } catch (e) {
         console.warn('[CRBS] 特效字幕渲染失败', e);
       }
@@ -128,7 +141,10 @@
         if (!this.ensureMounted()) return;
       }
       const ch = this.layout();
-      const t = this.video.currentTime;
+      this.renderAt(this.video.currentTime - this.opts.subtitleOffsetSeconds, ch);
+    }
+
+    renderAt(t, ch) {
       const active = [];
       for (const ev of this.dialogue) {
         if (ev.start > t) break;
@@ -153,6 +169,7 @@
       const top = [];
       for (const ev of active) {
         const tr = this.session && this.session.getLine(ev.index);
+        if (displayMode === 'translation' && (!tr || typeof tr.t !== 'string' || !tr.t.trim())) continue;
         const line = document.createElement('div');
         line.className = 'crbs-line' + (/ital/i.test(ev.style) ? ' crbs-italic' : '');
         const origEl = document.createElement('div');
@@ -166,14 +183,14 @@
           trEl.style.fontSize = trPx + 'px';
           trEl.textContent = root.CRBS.restoreLineBreaks(tr.t, ev.plain);
         }
-        if (displayMode === 'translation' && trEl) {
+        if (displayMode === 'translation') {
           line.append(trEl);
         } else if (trEl) {
           if (translationPosition === 'bottom') line.append(origEl, trEl); else line.append(trEl, origEl);
         } else {
           line.append(origEl);
         }
-        (/top/i.test(ev.style) ? top : bottom).push(line);
+        ((ev.placement ? ev.placement === 'top' : /top/i.test(ev.style)) ? top : bottom).push(line);
       }
       this.bottomEl.replaceChildren(...bottom);
       this.topEl.replaceChildren(...top);

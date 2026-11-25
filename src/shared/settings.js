@@ -32,6 +32,17 @@
   };
 
   const KEY = 'settings';
+  const SUBTITLE_OFFSET_MAX = 600;
+  const SUBTITLE_OFFSET_STEP = 0.5;
+
+  function normalizeSubtitleOffset(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? Math.round(Math.max(-SUBTITLE_OFFSET_MAX, Math.min(SUBTITLE_OFFSET_MAX, n)) / SUBTITLE_OFFSET_STEP) * SUBTITLE_OFFSET_STEP : 0;
+  }
+
+  function subtitleOffsetKey(episodeId) {
+    return 'subtitleOffset:' + episodeId;
+  }
 
   async function loadSettings() {
     const got = await chrome.storage.local.get(KEY);
@@ -45,7 +56,8 @@
     return next;
   }
 
-  const api = { PROVIDER_PRESETS, DEFAULT_SETTINGS, SETTINGS_KEY: KEY, loadSettings, saveSettings };
+  const api = { PROVIDER_PRESETS, DEFAULT_SETTINGS, SETTINGS_KEY: KEY, loadSettings, saveSettings,
+    SUBTITLE_OFFSET_MAX, SUBTITLE_OFFSET_STEP, normalizeSubtitleOffset, subtitleOffsetKey };
   root.CRBS = Object.assign(root.CRBS || {}, api);
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

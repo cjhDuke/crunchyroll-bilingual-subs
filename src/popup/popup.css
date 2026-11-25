@@ -21,3 +21,12 @@ a { color: var(--accent); text-decoration: none; }
 .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
 select { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
 select option { color: #000; }
+.offset-controls { margin: 0 0 12px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+.offset-controls legend { padding: 0 4px; }
+.offset-controls .row { margin-bottom: 2px; }
+#offsetSeconds { width: 72px; padding: 3px 5px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: inherit; font: inherit; }
+#offsetSlider { width: 100%; margin: 6px 0; accent-color: var(--accent); }
+.offset-buttons { gap: 4px; margin: 0 0 5px; }
+.offset-buttons button { padding: 4px; white-space: nowrap; }
+.offset-controls p { margin: 2px 0 0; font-size: 11px; }
+.offset-controls:disabled { opacity: 0.55; }
