@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseAss, plainText, isDialogueEvent, stripDialogue, hashString } = require('../src/core/ass.js');
+const { parseAss, plainText, isDialogueEvent, isTranslatableAssEvent, createPositionedAss, stripDialogue, hashString } = require('../src/core/ass.js');
 
 const SAMPLE = [
   '[Script Info]',
@@ -94,12 +94,10 @@ test('titles and ordinary upper aligned text translate; sign styles and position
   ]);
   const { events } = parseAss(source);
   const dialogue = events.filter(isDialogueEvent);
-  assert.deepEqual(dialogue.map((ev) => ev.index), [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(dialogue.map((ev) => ev.index), [1, 2, 4, 7]);
   assert.ok(dialogue.every((ev) => ev.placement === 'top'));
   const remaining = parseAss(stripDialogue(source, new Set(dialogue.map((ev) => ev.index)))).events;
-  assert.deepEqual(remaining.map((ev) => ev.plain), [
-    'Notice', 'Positioned dialogue', 'Unclassified sign', 'Moving title', 'Rotating caption',
-  ]);
+  assert.deepEqual(remaining.map((ev) => ev.plain), events.filter((ev) => !dialogue.includes(ev)).map((ev) => ev.plain));
 });
 
 test('inline alignment overrides top style including an explicit bottom override', () => {
@@ -171,11 +169,9 @@ test('static title position determines region despite bottom style anchor; missi
     ].map(([style, text]) => `Dialogue: 0,0:00:01.00,0:00:05.00,${style},,0,0,0,,${text}`),
   ].join('\n');
   const { events } = parseAss(source);
-  assert.deepEqual(events.slice(0, 6).map((ev) => ev.placement), ['top', 'bottom', 'bottom', 'bottom', 'top', 'bottom']);
+  assert.deepEqual(events.slice(0, 6).map((ev) => ev.placement), ['bottom', 'bottom', 'bottom', 'bottom', 'bottom', 'top']);
   assert.deepEqual(events.slice(0, 6).map((ev) => ev.alignment), [2, 2, 2, 2, 2, 8]);
-  assert.deepEqual(events.map(isDialogueEvent), [true, true, true, true, true, true, false, false]);
-  const withoutResolution = parseAss(source.replace('PlayResY: 720', '')).events;
-  assert.deepEqual(withoutResolution.slice(0, 6).map((ev) => ev.placement), ['top', 'top', 'top', 'bottom', 'top', 'top']);
+  assert.deepEqual(events.map(isDialogueEvent), [false, false, false, true, false, false, false, false]);
 });
 
 test('full Episode Title names translate without admitting sign title styles', () => {
@@ -185,8 +181,91 @@ test('full Episode Title names translate without admitting sign title styles', (
     ['sign_Episode_Title', '{\\an8}Sign title'],
   ]).replace('Style: Arial,8,Top', 'Style: Arial,8,Top\nStyle: Arial,2,Episode Title\nStyle: Arial,2,Episode_Title');
   const { events } = parseAss(source);
-  assert.deepEqual(events.map(isDialogueEvent), [true, true, false]);
-  assert.deepEqual(events.slice(0, 2).map((ev) => ev.placement), ['top', 'bottom']);
+  assert.deepEqual(events.map(isDialogueEvent), [false, false, false]);
   const signs = parseAss(stripDialogue(source, new Set(events.filter(isDialogueEvent).map((ev) => ev.index)))).events;
-  assert.deepEqual(signs.map((ev) => ev.style), ['sign_Episode_Title']);
+  assert.deepEqual(signs.map((ev) => ev.style), events.map((ev) => ev.style));
+});
+
+test('plain text ignores drawing segments while mixed visible text remains translatable', () => {
+  const { events } = parseAss(track([
+    ['main', '{\\p1}m 0 0 l 10 10{\\p0}Visible caption'],
+    ['main', '{\\p1}m 0 0 l 10 10{\\p0}'],
+  ]));
+  assert.deepEqual(events.map((ev) => ev.plain), ['Visible caption', '']);
+  assert.equal(isTranslatableAssEvent(events[0]), true);
+  assert.equal(isTranslatableAssEvent(events[1]), false);
+});
+
+test('positioned ASS output preserves native events and inserts safe literal translations by mode', () => {
+  const source = track([
+    ['main', 'Ordinary line'], ['sign_notice', '{\\pos(100,40)}Hello'],
+    ['main', '{\\move(0,0,10,10)}Moving'], ['main', 'No translation'],
+  ]);
+  const events = parseAss(source).events;
+  const set = new Set(events.filter(isDialogueEvent).map((ev) => ev.index));
+  const render = createPositionedAss(source, events, set);
+  const getLine = (i) => ({ t: i === 0 ? '普通对白' : i === 1 ? '你好, {\\pos(1,2)}' : '移动' , s: '原文' });
+  const bilingual = parseAss(render({ displayMode: 'bilingual', translationPosition: 'bottom' }, getLine)).events;
+  assert.deepEqual(bilingual.map((ev) => ev.text), [
+    '{\\pos(100,40)}Hello\\N你好, ｛＼pos(1,2)｝',
+    '{\\move(0,0,10,10)}Moving\\N移动',
+  ]);
+  const original = parseAss(render({ displayMode: 'original' }, () => undefined)).events;
+  assert.equal(original.length, 2);
+  const translation = parseAss(render({ displayMode: 'translation' }, () => undefined)).events;
+  assert.equal(translation.length, 0);
+});
+
+test('mixed drawing cannot hide either bilingual translation order, and translation retains inline anchor', () => {
+  const source = track([
+    ['sign_notice', '{\\an7\\pos(25,35)\\p1}m 0 0 l 10 10{\\p0}Label{\\p1}m 1 1 l 2 2'],
+  ]);
+  const { events } = parseAss(source);
+  const render = createPositionedAss(source, events, new Set());
+  const getLine = () => ({ t: '译文' });
+  for (const translationPosition of ['top', 'bottom']) {
+    const [event] = parseAss(render({ displayMode: 'bilingual', translationPosition }, getLine)).events;
+    assert.match(event.text, /\\an7\\pos\(25,35\)/);
+    assert.deepEqual(event.plain.split('\n'), translationPosition === 'top' ? ['译文', 'Label'] : ['Label', '译文']);
+  }
+  const [event] = parseAss(render({ displayMode: 'translation' }, getLine)).events;
+  assert.equal(event.text, '{\\an7\\pos(25,35)}译文');
+});
+
+test('malformed Dialogue does not shift parsed indexes; reordered fields preserve positioned translation and timing', () => {
+  const source = [
+    '[Events]',
+    'Format: Text, Effect, Name, Style, End, Start, Layer, MarginV, MarginR, MarginL',
+    'Dialogue: broken,too,few',
+    'Dialogue: Source caption,,Sign,sign_notice,0:00:06.00,0:00:02.00,4,0,0,0',
+  ].join('\n');
+  const events = parseAss(source).events;
+  assert.equal(events.length, 1);
+  assert.equal(events[0].index, 0);
+  assert.equal(events[0].start, 2);
+  const kept = stripDialogue(source, new Set());
+  assert.match(kept, /Dialogue: broken,too,few/);
+  assert.match(kept, /Source caption/);
+  const render = createPositionedAss(source, events, new Set());
+  const out = render({ displayMode: 'translation' }, () => ({ t: '译文', s: 'Source caption' }));
+  assert.doesNotMatch(out, /Dialogue: broken,too,few/);
+  assert.match(out, /译文,,Sign,sign_notice,0:00:06\.00,0:00:02\.00,4,0,0,0/);
+  assert.doesNotMatch(out, /Source caption/);
+});
+
+test('positioned title and side aligned top lines stay native; translation drops drawing and karaoke but retains late motion tags', () => {
+  const source = track([
+    ['Ep Title', '{\\pos(10,20)}Positioned title'],
+    ['UpperLeft', 'Left upper'], ['UpperRight', 'Right upper'],
+    ['Title', '{\\p1}m 0 0 l 10 10{\\p0}Shape {\\move(1,2,3,4)}label'],
+    ['Title', 'Plain {\\k20}timed {\\pos(5,6)}late'],
+  ]);
+  const events = parseAss(source).events;
+  assert.deepEqual(events.map(isDialogueEvent), [false, false, false, false, false]);
+  const render = createPositionedAss(source, events, new Set());
+  const output = parseAss(render({ displayMode: 'translation' }, () => ({ t: '译文', s: '' }))).events;
+  assert.equal(output.length, 5);
+  assert.equal(output[3].text, '{\\move(1,2,3,4)}译文');
+  assert.equal(output[4].text, '{\\pos(5,6)}译文');
+  assert.ok(output.every((ev) => !/\\p1|\\k20/.test(ev.text)));
 });

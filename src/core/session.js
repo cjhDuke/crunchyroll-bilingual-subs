@@ -16,6 +16,7 @@
       this.firstDispatched = false;
       this.playhead = 0;
       this.running = 0;
+      this.started = false;
       this.stopped = false;
       this.listeners = [];
       this.cacheTimer = null;
@@ -51,6 +52,7 @@
       } else {
         this.glossaryDone = true;
       }
+      this.started = true;
       this.pump();
     }
 
@@ -81,7 +83,7 @@
     }
 
     pump() {
-      if (this.stopped) return;
+      if (!this.started || this.stopped) return;
       const limit = Math.max(1, this.settings.concurrency || 5);
       while (this.running < limit) {
         if (!this.glossaryDone && this.firstDispatched) return;
@@ -96,15 +98,18 @@
       const before = this.dialogue.slice(Math.max(0, b.pos - CONTEXT_LINES), b.pos).map((e) => e.plain);
       const endPos = b.pos + b.events.length;
       const after = this.dialogue.slice(endPos, endPos + CONTEXT_LINES).map((e) => e.plain);
-      return { lines: b.events.map((e) => ({ id: e.index, text: e.plain })), before, after };
+      const events = b.retranslate ? b.events : b.events.filter((e) => !this.lines.has(e.index));
+      return { lines: events.map((e) => ({ id: e.index, text: e.plain })), before, after };
     }
 
     run(b) {
       b.status = 'running';
       this.running++;
       const gen = (b.gen = (b.gen || 0) + 1);
+      const input = this.batchInput(b);
+      b.retranslate = false;
       Promise.resolve()
-        .then(() => this.deps.translateBatch(this.batchInput(b), { glossary: this.glossary, title: this.title }))
+        .then(() => this.deps.translateBatch(input, { glossary: this.glossary, title: this.title }))
         .then((res) => {
           if (this.stopped || gen !== b.gen) return;
           for (const e of b.events) {
@@ -173,7 +178,10 @@
         const redo = scope === 'all'
           || b.status === 'failed'
           || b.events.some((e) => (this.lines.get(e.index) || {}).s === 'google');
-        if (redo) b.status = 'pending';
+        if (redo) {
+          b.status = 'pending';
+          b.retranslate = true;
+        }
       }
       if (scope === 'all') {
         this.glossary = [];

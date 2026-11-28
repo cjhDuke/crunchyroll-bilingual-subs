@@ -101,6 +101,21 @@ test('full cache hit makes no translate calls', async () => {
   assert.equal(h.session.stats().done, 10);
 });
 
+test('initial playhead waits for cache and a newly added subtitle only translates missing lines', async () => {
+  const h = harness({ cache: { lines: { 6: { t: 'Cached dialogue', s: 'llm' } }, glossary: [] } });
+  h.session.setPlayhead(72);
+  await tick();
+  assert.equal(h.calls.length, 0);
+  await h.session.start();
+  await tick();
+  assert.deepEqual(h.calls[0].ids, [7]);
+  h.calls[0].d.resolve(ok([7]));
+  await tick();
+  assert.equal(h.session.getLine(6).t, 'Cached dialogue');
+  assert.equal(h.session.getLine(7).t, 'T7');
+  h.session.stop();
+});
+
 test('failed batches count as ready (original shown) and are reported', async () => {
   const h = harness();
   await h.session.start();

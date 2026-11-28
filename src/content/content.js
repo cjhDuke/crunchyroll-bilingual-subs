@@ -130,15 +130,16 @@
       const text = await bg({ type: 'fetchText', url: sub.url });
       if (!current()) return;
       const { events } = C.parseAss(text);
-      const dialogue = events.filter(C.isDialogueEvent);
+      const translatable = events.filter(C.isTranslatableAssEvent);
+      const dialogue = translatable.filter(C.isDialogueEvent);
       const dialogueSet = new Set(dialogue.map((e) => e.index));
       overlay.setOptions(overlayOpts());
-      overlay.setTrack({ dialogue, signsAss: C.stripDialogue(text, dialogueSet) });
+      overlay.setTrack({ dialogue, positionedAss: C.createPositionedAss(text, events, dialogueSet) });
 
       const lang2 = C.findLang(selectedSettings.targetLang);
       const cacheKey = `cache:${selectedEpisode}:${lang}:${lang2.code}:${C.hashString(text)}`;
       const session = new C.TrackSession({
-        events: dialogue,
+        events: translatable,
         title,
         settings: selectedSettings,
         deps: {
@@ -156,12 +157,17 @@
       });
       state.session = session;
       overlay.setSession(session);
-      session.onUpdate(() => checkGate());
+      session.onUpdate(() => {
+        if (!current()) return;
+        overlay.refreshPositioned();
+        checkGate();
+      });
       const v = C.findVideo();
       if (v) session.setPlayhead(subtitleTime(v));
       gate && (gate.session = session);
       await session.start();
       if (!current()) return;
+      overlay.refreshPositioned();
       state.status = 'active';
       checkGate();
     } catch (err) {

@@ -14,10 +14,11 @@ function deferred() {
 async function harness(storage = {}, ass = {
   parseAss: (text) => ({ events: [{ index: 0, plain: text }] }),
   isDialogueEvent: () => true,
-  stripDialogue: (text) => text,
+  isTranslatableAssEvent: () => true,
+  createPositionedAss: (text) => () => text,
   hashString: (text) => text,
 }) {
-  const listeners = {}, timers = new Map(), requests = [], sessions = [], writes = [], tracks = [], options = [], events = {};
+  const listeners = {}, timers = new Map(), requests = [], sessions = [], writes = [], tracks = [], options = [], events = {}, positioned = [];
   const saved = storage.saved || {};
   let timerId = 0, statusListener;
   class Video {
@@ -34,8 +35,13 @@ async function harness(storage = {}, ass = {
     DEFAULT_SETTINGS: settings,
     loadSettings: async () => settings,
     Overlay: class {
-      clear() {} setOptions(opts) { options.push(opts); } toast() {} hideToast() {} setSession() {}
-      setTrack(track) { tracks.push(track); }
+      clear() { this.track = null; this.session = null; }
+      setOptions(opts) { options.push(opts); } toast() {} hideToast() {}
+      setSession(session) { this.session = session; }
+      setTrack(track) { this.track = track; tracks.push(track); }
+      refreshPositioned() {
+        if (this.track) positioned.push(this.track.positionedAss({ displayMode: 'translation' }, (i) => this.session.getLine(i)));
+      }
     },
     findVideo: () => video,
     ...ass,
@@ -43,10 +49,12 @@ async function harness(storage = {}, ass = {
     buildGlossaryMessages: (obj) => obj,
     parseGlossary: (obj) => obj,
     TrackSession: class {
-      constructor(opts) { this.opts = opts; this.startResult = deferred(); sessions.push(this); }
+      constructor(opts) { this.opts = opts; this.startResult = deferred(); this.lines = new Map(); sessions.push(this); }
       start() { return this.startResult.promise; }
       stop() { this.stopped = true; }
-      onUpdate() {} setPlayhead(t) { this.playhead = t; }
+      onUpdate(callback) { this.update = callback; }
+      setPlayhead(t) { this.playhead = t; }
+      getLine(i) { return this.lines.get(i); }
       stats() { return { total: this.opts.events.length }; }
       isReadyAt(t) { this.readyTime = t; return true; }
     },
@@ -82,7 +90,7 @@ async function harness(storage = {}, ass = {
   await flush();
   const send = (data) => listeners.message({ source: window, data: { source: 'crbs-page', ...data } });
   return {
-    requests, sessions, writes, video, tracks, options, saved,
+    requests, sessions, writes, video, tracks, options, saved, positioned,
     event: (type) => events[type]({ target: video }),
     offset: (episodeId, offsetSeconds) => new Promise((resolve) => statusListener({ type: 'setSubtitleOffset', episodeId, offsetSeconds }, null, resolve)),
     playback: (episodeId = 'ep87', subtitles = { 'en-US': { format: 'ass', url: 'en.ass' } }, hasAds = false) =>
@@ -110,7 +118,7 @@ test('leading ad -> main uses fallback without pausing ad; empty responses prese
   assert.equal(h.sessions[0].stopped, undefined);
 });
 
-test('custom bottom-centered ASS dialogue reaches the translation session and status count', async () => {
+test('ordinary and positioned ASS text share a session, status and cached or incoming translations', async () => {
   const ass = require('../src/core/ass.js');
   const h = await harness({}, ass);
   const text = [
@@ -118,17 +126,31 @@ test('custom bottom-centered ASS dialogue reaches the translation session and st
     '[Events]', 'Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text',
     'Dialogue: 0,0:00:01.00,0:00:02.00,CustomEnglish,,0,0,0,,First line',
     'Dialogue: 0,0:00:02.00,0:00:03.00,CustomEnglish,,0,0,0,,Second line',
-    'Dialogue: 0,0:00:03.00,0:00:04.00,sign_notice,,0,0,0,,Notice',
+    'Dialogue: 0,0:00:03.00,0:00:04.00,sign_notice,,0,0,0,,{\\pos(200,40)}Notice',
+    'Dialogue: 0,0:00:03.00,0:00:04.00,sign_notice,,0,0,0,,{\\move(20,20,100,60)}Moving',
+    'Dialogue: 0,0:00:03.00,0:00:04.00,sign_notice,,0,0,0,,{\\p1}m 0 0 l 10 10',
   ].join('\n');
   h.playback();
   h.select('en-US');
   h.requests[0].resolve({ ok: true, data: text });
   await flush();
-  h.sessions[0].startResult.resolve();
+  const session = h.sessions[0];
+  session.lines.set(2, { t: '告示' });
+  session.startResult.resolve();
   await flush();
-  assert.deepEqual(h.sessions[0].opts.events.map((event) => event.plain), ['First line', 'Second line']);
-  assert.equal(h.status().stats.total, 2);
-  assert.deepEqual(ass.parseAss(h.tracks[0].signsAss).events.map((event) => event.plain), ['Notice']);
+  assert.deepEqual(session.opts.events.map((event) => event.plain), ['First line', 'Second line', 'Notice', 'Moving']);
+  assert.equal(h.status().stats.total, 4);
+  assert.deepEqual(h.tracks[0].dialogue.map((event) => event.plain), ['First line', 'Second line']);
+  assert.deepEqual(ass.parseAss(h.positioned.at(-1)).events.map((event) => event.plain), ['告示']);
+  session.lines.set(3, { t: '移动中' });
+  session.update();
+  const displayed = ass.parseAss(h.positioned.at(-1)).events;
+  assert.deepEqual(displayed.map((event) => event.plain), ['告示', '移动中']);
+  assert.match(displayed[1].text, /\\move\(20,20,100,60\)/);
+  const updateCount = h.positioned.length;
+  h.playback('next');
+  session.update();
+  assert.equal(h.positioned.length, updateCount);
 });
 
 test('selection before playback, fallback preference, and explicit none', async () => {

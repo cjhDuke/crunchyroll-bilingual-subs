@@ -1,4 +1,4 @@
-// 字幕显示层：对白双语自绘，特效行交给 ASS.js 渲染。
+// 字幕显示层：普通对白自绘，原位字幕交给 ASS.js 渲染。
 (function (root) {
   function findVideo() {
     return document.querySelector('.bitmovinplayer-container video') || document.querySelector('#player-container video');
@@ -9,7 +9,8 @@
       this.opts = { displayMode: 'bilingual', translationPosition: 'top', fontScale: 1, subtitleOffsetSeconds: 0 };
       this.dialogue = [];
       this.session = null;
-      this.signsAss = null;
+      this.positionedAss = null;
+      this.positionedText = null;
       this.ass = null;
       this.video = null;
       this.lastKey = '';
@@ -21,15 +22,14 @@
     setOptions(opts) {
       Object.assign(this.opts, opts);
       this.lastKey = '';
-      this.syncSigns();
+      this.refreshPositioned();
       if (this.video && this.topEl) this.renderAt(this.video.currentTime - this.opts.subtitleOffsetSeconds, this.layout());
     }
 
-    syncSigns() {
-      if (this.signsEl) this.signsEl.style.visibility = this.opts.displayMode === 'translation' ? 'hidden' : 'visible';
-      if (this.ass) {
+    syncPositionedDelay() {
+      if (this.ass && this.ass.delay !== this.opts.subtitleOffsetSeconds) {
+        // ASS.js 的 delay setter 会重新按 currentTime - delay 定位活动事件，暂停时同样生效。
         this.ass.delay = this.opts.subtitleOffsetSeconds;
-        if (this.opts.displayMode === 'translation') this.ass.hide(); else this.ass.show();
       }
     }
 
@@ -60,34 +60,47 @@
       }
       if (video !== this.video || remounted) {
         this.video = video;
-        this.rebuildSigns();
+        this.rebuildPositioned();
       }
       if (!this.raf) this.raf = requestAnimationFrame(this.loop);
       return true;
     }
 
-    setTrack({ dialogue, signsAss }) {
+    setTrack({ dialogue, positionedAss }) {
       this.dialogue = dialogue.slice().sort((a, b) => a.start - b.start);
-      this.signsAss = signsAss;
+      this.positionedAss = positionedAss || null;
       this.lastKey = '';
       this.ensureMounted();
-      this.rebuildSigns();
+      this.refreshPositioned();
     }
 
     setSession(session) {
       this.session = session;
       this.lastKey = '';
+      this.refreshPositioned();
     }
 
-    rebuildSigns() {
+    refreshPositioned() {
+      let text = null;
+      if (this.positionedAss) {
+        try { text = this.positionedAss(this.opts, (index) => this.session && this.session.getLine(index)) || ''; }
+        catch (e) { console.warn('[CRBS] 原位字幕生成失败', e); }
+      }
+      if (text !== this.positionedText) {
+        this.positionedText = text;
+        this.rebuildPositioned();
+      } else this.syncPositionedDelay();
+    }
+
+    rebuildPositioned() {
       if (this.ass) {
         try { this.ass.destroy(); } catch { /* ignore */ }
         this.ass = null;
       }
-      if (!this.signsAss || !this.video || !this.signsEl || typeof root.ASS !== 'function') return;
+      if (!this.positionedText || !this.video || !this.signsEl || typeof root.ASS !== 'function') return;
       try {
-        this.ass = new root.ASS(this.signsAss, this.video, { container: this.signsEl, resampling: 'video_height' });
-        this.syncSigns();
+        this.ass = new root.ASS(this.positionedText, this.video, { container: this.signsEl, resampling: 'video_height' });
+        this.syncPositionedDelay();
       } catch (e) {
         console.warn('[CRBS] 特效字幕渲染失败', e);
       }
@@ -96,8 +109,9 @@
     clear() {
       this.dialogue = [];
       this.session = null;
-      this.signsAss = null;
-      this.rebuildSigns();
+      this.positionedAss = null;
+      this.positionedText = null;
+      this.rebuildPositioned();
       this.lastKey = '';
       if (this.bottomEl) { this.bottomEl.textContent = ''; this.topEl.textContent = ''; }
     }
